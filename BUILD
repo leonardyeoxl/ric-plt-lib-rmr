@@ -54,6 +54,7 @@ configuration:
   -DPRESERVE_PTYPE=1	Do not change the processor type when naming deb packages
   -DSKIP_EXTERNALS=1	Do not use Nano/NNG submodules when building; use installed packages
 						(See caution in the 'Libraries' section below)
+  -DBUILD_NNG=1 To allow building NNG module
 
 
 Packages
