@@ -89,6 +89,7 @@ typedef struct uta_ctx  uta_ctx_t;
 #define CFL_WARN		0x04		// ok to warn on stderr for some things that shouldn't happen
 #define CFL_FULLRT		0x08		// set when we have received an initial full route table (prevent updates before one arrives)
 
+#define CTXFL_WARN		0x01            // ok to warn on stderr for some things that shouldn't happen
 									// msg buffer flags
 #define MFL_ZEROCOPY	0x01		// the message is an allocated zero copy message and can be sent.
 #define MFL_NOALLOC		0x02		// send should NOT allocate a new buffer before returning

@@ -98,6 +98,13 @@ struct uta_ctx {
 								// added for route manager request/states
 	rmr_whid_t	rtg_whid;		// wormhole id to the route manager for acks/requests
 	char*		table_id;		// table ID of the route table load in progress
+
+	int dcount;
+	pthread_mutex_t* rtgate;
+	int snarf_rt_fd;
+	int rtable_ready;
+	char* seed_rt_fname;
+	void* ephash;
 };
 
 

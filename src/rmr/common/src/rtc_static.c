@@ -592,7 +592,7 @@ static void* raw_rtc( void* vctx ) {
 				}
 			}
 
-			alarm_if_drops( ctx );				// send an alarm if message are dropping, clear if we set one and thtings are better
+			alarm_if_drops( ctx, pvt_cx );				// send an alarm if message are dropping, clear if we set one and thtings are better
 		}
 
 		vlevel = refresh_vlevel( 0 );			// ensure it's fresh when we get a message
