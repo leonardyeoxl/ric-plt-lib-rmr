@@ -1,0 +1,10 @@
+FROM ubuntu:20.04
+
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y build-essential libnng-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY sender /usr/local/bin/sender
+
+CMD ["./usr/local/bin/sender"]

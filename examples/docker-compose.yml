@@ -1,0 +1,28 @@
+version: '3'
+
+services:
+  rmr_sender:
+    build:
+      context: .
+      dockerfile: Dockerfile.sender
+    volumes:
+      - ./shared:/app/shared
+      - ./sender_cert:/app/cert
+    environment:
+      - RMR_SEED_RT=/app/shared/route_table.rt
+      - CERT_PATH=/app/cert/sender.crt
+      - CA_CERT_PATH=/app/cert/ca.crt
+    depends_on:
+      - rmr_receiver
+
+  rmr_receiver:
+    build:
+      context: .
+      dockerfile: Dockerfile.receiver
+    volumes:
+      - ./shared:/app/shared
+      - ./receiver_cert:/app/cert
+    environment:
+      - RMR_SEED_RT=/app/shared/route_table.rt
+      - CERT_PATH=/app/cert/receiver.crt
+      - CA_CERT_PATH=/app/cert/ca.crt
