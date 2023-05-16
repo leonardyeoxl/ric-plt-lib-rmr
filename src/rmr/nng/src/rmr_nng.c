@@ -59,6 +59,10 @@
 #include <nng/protocol/pipeline0/push.h>
 #include <nng/protocol/pipeline0/pull.h>
 
+#include <nng/protocol/reqrep0/req.h>
+#include <nng/protocol/reqrep0/rep.h>
+#include <nng/supplemental/tls/tls.h>
+#include <nng/transport/tls/tls.h>
 
 #include "rmr.h"				// things the users see
 #include "rmr_agnostic.h"		// agnostic things (must be included before private)
@@ -604,6 +608,26 @@ extern int rmr_set_rtimeout( void* vctx, int time ) {
 	return 0;
 }
 
+static int configure_tls(nng_tls_config *cfg, const char *cert_key_file, const char *ca_cert_file) {
+    int rv;
+
+    if ((rv = nng_tls_config_alloc(&cfg, NNG_TLS_MODE_SERVER)) != 0) {
+        return rv;
+    }
+
+    if ((rv = nng_tls_config_own_cert(cfg, cert_key_file, cert_key_file, NULL)) != 0) {
+        nng_tls_config_free(cfg);
+        return rv;
+    }
+
+    if ((rv = nng_tls_config_ca_chain(cfg, ca_cert_file, NULL)) != 0) {
+        nng_tls_config_free(cfg);
+        return rv;
+    }
+
+    return 0;
+}
+
 
 /*
 	This is the actual init workhorse. The user visible function meerly ensures that the
@@ -625,6 +649,9 @@ static void* init(  char* uproto_port, int max_msg_size, int flags ) {
 	char*	tok2;
 	int		state;
 	int		old_vlevel = 0;
+	// char*	cert_key_file;
+	// char*	ca_cert_file;
+	// nng_tls_config	*tls_cfg;
 
 	old_vlevel = rmr_vlog_init();		// initialise and get the current level
 	rmr_set_vlevel( RMR_VL_INFO );		// we WILL announce our version etc
@@ -637,6 +664,7 @@ static void* init(  char* uproto_port, int max_msg_size, int flags ) {
 	rmr_set_vlevel( old_vlevel );		// return logging to the desired state
 
 	errno = 0;
+	rmr_vlog( RMR_VL_INFO, "uproto_port: %s\n", uproto_port);
 	if( uproto_port == NULL ) {
 		proto_port = strdup( DEF_COMM_PORT );
 	} else {
@@ -742,12 +770,37 @@ static void* init(  char* uproto_port, int max_msg_size, int flags ) {
 	if( (interface = getenv( ENV_BIND_IF )) == NULL ) {
 		interface = "0.0.0.0";
 	}
+
+	rmr_vlog( RMR_VL_INFO, "[configure_tls nng_tls_register] \n");
+
+	// if( (ca_cert_file = getenv( "CERT_PATH" )) != NULL && (cert_key_file = getenv( "CA_CERT_PATH" ) != NULL)) {
+	// 	ca_cert_file = getenv( "CA_CERT_PATH" );
+	// 	cert_key_file = getenv( "CERT_PATH" );
+
+	// 	if ((state = configure_tls(tls_cfg, cert_key_file, ca_cert_file)) != 0) {
+	// 		rmr_vlog( RMR_VL_CRIT, "rmr_init: configure_tls: %s\n", nng_strerror(state) );
+	// 		return NULL;
+	// 	}
+
+	// 	if ((state = nng_tls_register()) != 0) {
+	// 		rmr_vlog( RMR_VL_CRIT, "rmr_init: nng_tls_register: %s\n", nng_strerror(state) );
+	// 		return NULL;
+	// 	}
+
+	// 	snprintf( bind_info, sizeof( bind_info ), "tls+%s://%s:%s", proto, interface, port );
+	// } else {
+	// 	snprintf( bind_info, sizeof( bind_info ), "%s://%s:%s", proto, interface, port );
+	// }
+
 	// NOTE: if there are options that might need to be configured, the listener must be created, options set, then started
 	//       rather than using this generic listen() call.
 	snprintf( bind_info, sizeof( bind_info ), "%s://%s:%s", proto, interface, port );
 	if( (state = nng_listen( ctx->nn_sock, bind_info, NULL, NO_FLAGS )) != 0 ) {
 		rmr_vlog( RMR_VL_CRIT, "rmr_init: unable to start nng listener for %s: %s\n", bind_info, nng_strerror( state ) );
 		nng_close( ctx->nn_sock );
+		// if (tls_cfg != NULL) {
+		// 	nng_tls_config_free(tls_cfg);
+		// }
 		free( proto_port );
 		free_ctx( ctx );
 		return NULL;
