@@ -1,0 +1,22 @@
+FROM ubuntu:20.04
+WORKDIR /app
+
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y build-essential \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
+
+COPY librmr_nng.so.3.8.2 /usr/local/lib/librmr_nng.so.3.8.2
+COPY librmr_nng.so.3 /usr/local/lib/librmr_nng.so.3
+COPY librmr_nng.so /usr/local/lib/librmr_nng.so
+COPY libnng.so.1.1.0 /usr/local/lib/libnng.so.1.1.0
+COPY libnng.so.1 /usr/local/lib/libnng.so.1
+COPY libnng.so /usr/local/lib/libnng.so
+
+COPY receiver receiver
+
+EXPOSE 4560
+
+CMD ["./receiver"]

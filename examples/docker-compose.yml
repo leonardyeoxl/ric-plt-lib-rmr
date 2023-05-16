@@ -1,0 +1,28 @@
+version: '3'
+
+services:
+  rmr_sender:
+    build:
+      context: .
+      dockerfile: Dockerfile.sender
+    volumes:
+      - ./shared/:/app/shared/
+    environment:
+      RMR_RTG_SVC: -1
+      RMR_SEED_RT: /app/shared/route_table.rt
+    ports:
+      - 43086:43086
+    depends_on:
+      - rmr_receiver
+
+  rmr_receiver:
+    build:
+      context: .
+      dockerfile: Dockerfile.receiver
+    volumes:
+      - ./shared/:/app/shared/
+    environment:
+      RMR_RTG_SVC: -1
+      RMR_SEED_RT: /app/shared/route_table.rt
+    ports:
+      - 4560:4560
