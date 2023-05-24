@@ -1,8 +1,18 @@
+## NNG
+1. `cd ext/nng/`
+2. `git checkout ee0b44406d2b658886760ea08c0af12781ab7e3a` (TLS 1.3 support https://github.com/nanomsg/nng/commit/ee0b44406d2b658886760ea08c0af12781ab7e3a)
+3. `mkdir build`
+4. `cd build`
+5. `cmake -DNNG_ENABLE_TLS=ON ..`
+6. `sudo make install`
+
 ## Build with NNG support
 1. mkdir build
 2. cd build
 3. cmake .. -DSKIP_EXTERNALS=0 -DPACK_EXTERNALS=1 -DBUILD_NNG=1
 4. make
+
+`cmake .. -DSKIP_EXTERNALS=0 -DPACK_EXTERNALS=1 -DBUILD_NNG=1 -DDEV_PKG=1`
 
 ## Test Receiver Container
 ```sh

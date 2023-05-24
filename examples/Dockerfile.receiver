@@ -2,7 +2,7 @@ FROM ubuntu:20.04
 WORKDIR /app
 
 RUN apt-get update && \
-    apt-get install --no-install-recommends -y build-essential \
+    apt-get install --no-install-recommends -y build-essential ca-certificates libssl-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -11,12 +11,34 @@ ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
 COPY librmr_nng.so.3.8.2 /usr/local/lib/librmr_nng.so.3.8.2
 COPY librmr_nng.so.3 /usr/local/lib/librmr_nng.so.3
 COPY librmr_nng.so /usr/local/lib/librmr_nng.so
-COPY libnng.so.1.1.0 /usr/local/lib/libnng.so.1.1.0
+# COPY librmr_nng.a /usr/local/lib/librmr_nng.a
+# COPY libnng.so.1.1.0 /usr/local/lib/libnng.so.1.1.0
+COPY libnng.so.1.3.0-dev /usr/local/lib/libnng.so.1.3.0-dev
 COPY libnng.so.1 /usr/local/lib/libnng.so.1
 COPY libnng.so /usr/local/lib/libnng.so
+COPY libnng.a  /usr/local/lib/libnng.a
+COPY libmbedtls.so  /usr/lib/x86_64-linux-gnu/libmbedtls.so
+COPY libmbedtls.so.12 /usr/lib/x86_64-linux-gnu/libmbedtls.so.12
+COPY libmbedtls.so.2.16.3 /usr/lib/x86_64-linux-gnu/libmbedtls.so.2.16.3
+COPY libmbedx509.so  /usr/lib/x86_64-linux-gnu/libmbedx509.so
+COPY libmbedx509.so.0 /usr/lib/x86_64-linux-gnu/libmbedx509.so.0
+COPY libmbedx509.so.2.16.3 /usr/lib/x86_64-linux-gnu/libmbedx509.so.2.16.3
+COPY libmbedcrypto.so  /usr/lib/x86_64-linux-gnu/libmbedcrypto.so
+COPY libmbedcrypto.so.3 /usr/lib/x86_64-linux-gnu/libmbedcrypto.so.3
+COPY libmbedcrypto.so.2.16.3 /usr/lib/x86_64-linux-gnu/libmbedcrypto.so.2.16.3
+
+COPY demo2_cert.pem cert.pem
+COPY demo2.key key.pem
+COPY ca.pem ca.pem
+# COPY demo_cert_key.pem demo_cert_key.pem
+COPY demo2_cert.pem /etc/ssl/certs/cert.pem
+COPY demo2.key /etc/ssl/private/key.pem
+# COPY sender_cert.pem /etc/ssl/certs/sender_crt.pem
+
+RUN update-ca-certificates
 
 COPY receiver receiver
 
-EXPOSE 4560
+# EXPOSE 4560
 
-CMD ["./receiver"]
+# CMD ["./receiver"]

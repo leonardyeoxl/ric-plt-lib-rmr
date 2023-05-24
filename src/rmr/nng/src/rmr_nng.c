@@ -52,6 +52,7 @@
 #include <arpa/inet.h>
 #include <semaphore.h>
 #include <pthread.h>
+#include <stdarg.h>
 
 #include <nng/nng.h>
 #include <nng/protocol/pubsub0/pub.h>
@@ -59,6 +60,7 @@
 #include <nng/protocol/pipeline0/push.h>
 #include <nng/protocol/pipeline0/pull.h>
 
+#include <nng/protocol/pair1/pair.h>
 #include <nng/protocol/reqrep0/req.h>
 #include <nng/protocol/reqrep0/rep.h>
 #include <nng/supplemental/tls/tls.h>
@@ -203,6 +205,8 @@ extern rmr_mbuf_t* rmr_mtosend_msg( void* vctx, rmr_mbuf_t* msg, int max_to ) {
 		d1[D1_CALLID_IDX] = NO_CALL_ID;										// must blot out so it doesn't queue on a chute at the other end
 	}	
 
+	// rmr_vlog( RMR_VL_DEBUG, "[sender] rmr_mtosend_msg\n" );
+
 	return mtosend_msg( vctx, msg, max_to );
 }
 
@@ -214,12 +218,18 @@ extern rmr_mbuf_t* rmr_mtosend_msg( void* vctx, rmr_mbuf_t* msg, int max_to ) {
 extern rmr_mbuf_t* rmr_send_msg( void* vctx, rmr_mbuf_t* msg ) {
 	char* d1;														// point at the call-id in the header
 
+	// rmr_vlog( RMR_VL_DEBUG, "[sender] in rmr_send_msg\n" );
+	// fprintf( stderr, "[sender] in rmr_send_msg\n" );
+
 	if( msg != NULL ) {
 		((uta_mhdr_t *) msg->header)->flags &= ~HFL_CALL_MSG;			// must ensure call flag is off
 
 		d1 = DATA1_ADDR( msg->header );
 		d1[D1_CALLID_IDX] = NO_CALL_ID;										// must blot out so it doesn't queue on a chute at the other end
 	}	
+
+	// rmr_vlog( RMR_VL_DEBUG, "[sender] rmr_send_msg\n" );
+	// fprintf( stderr, "[sender] rmr_send_msg\n" );
 
 	return rmr_mtosend_msg( vctx, msg,  -1 );							// retries < 0  uses default from ctx
 }
@@ -608,24 +618,431 @@ extern int rmr_set_rtimeout( void* vctx, int time ) {
 	return 0;
 }
 
-static int configure_tls(nng_tls_config *cfg, const char *cert_key_file, const char *ca_cert_file) {
-    int rv;
+static int
+init_listener_tls_ex(nng_listener l, int auth_mode)
+{
+	nng_tls_config *cfg;
+	int             rv;
 
-    if ((rv = nng_tls_config_alloc(&cfg, NNG_TLS_MODE_SERVER)) != 0) {
-        return rv;
-    }
+	if ((rv = nng_tls_config_alloc(&cfg, NNG_TLS_MODE_SERVER)) != 0) {
+		return (rv);
+	}
+	if ((rv = nng_tls_config_own_cert(cfg, cert, key, NULL)) != 0) {
+		goto out;
+	}
+	if ((rv = nng_listener_setopt_ptr(l, NNG_OPT_TLS_CONFIG, cfg)) != 0) {
+		goto out;
+	}
+	switch (auth_mode) {
+	case NNG_TLS_AUTH_MODE_REQUIRED:
+	case NNG_TLS_AUTH_MODE_OPTIONAL:
+		if ((rv = nng_tls_config_ca_chain(cfg, cert, NULL)) != 0) {
+			goto out;
+		}
+		break;
+	default:
+		break;
+	}
+	if ((rv = nng_tls_config_auth_mode(cfg, auth_mode)) != 0) {
+		goto out;
+	}
+out:
+	nng_tls_config_free(cfg);
+	return (0);
+}
 
-    if ((rv = nng_tls_config_own_cert(cfg, cert_key_file, cert_key_file, NULL)) != 0) {
-        nng_tls_config_free(cfg);
-        return rv;
-    }
+static int
+init_dialer_tls_ex(nng_dialer d, bool own_cert)
+{
+	nng_tls_config *cfg;
+	int             rv;
 
-    if ((rv = nng_tls_config_ca_chain(cfg, ca_cert_file, NULL)) != 0) {
-        nng_tls_config_free(cfg);
-        return rv;
-    }
+	if ((rv = nng_tls_config_alloc(&cfg, NNG_TLS_MODE_CLIENT)) != 0) {
+		return (rv);
+	}
 
-    return 0;
+	if ((rv = nng_tls_config_ca_chain(cfg, cert, NULL)) != 0) {
+		goto out;
+	}
+
+	if ((rv = nng_tls_config_server_name(cfg, "rmr_receiver")) != 0) {
+		goto out;
+	}
+	nng_tls_config_auth_mode(cfg, NNG_TLS_AUTH_MODE_REQUIRED);
+
+	if (own_cert) {
+		if ((rv = nng_tls_config_own_cert(cfg, cert, key, NULL)) !=
+		    0) {
+			goto out;
+		}
+	}
+
+	rv = nng_dialer_setopt_ptr(d, NNG_OPT_TLS_CONFIG, cfg);
+
+out:
+	nng_tls_config_free(cfg);
+	return (rv);
+}
+
+static int
+init_dialer_tls(nng_dialer dialer) {
+	nng_tls_config *cfg;
+	int             rv;
+
+	if ((rv = nng_tls_config_alloc(&cfg, NNG_TLS_MODE_CLIENT)) != 0) {
+		return (rv);
+	}
+
+	if ((rv = nng_tls_config_own_cert(cfg, cert, key, NULL)) != 0) {
+		goto out;
+	}
+
+	if ((rv = nng_tls_config_ca_chain(cfg, ca, NULL)) != 0) {
+		goto out;
+	}
+
+	if ((rv = nng_tls_config_server_name(cfg, "rmr_receiver")) != 0) {
+		goto out;
+	}
+	nng_tls_config_auth_mode(cfg, NNG_TLS_AUTH_MODE_NONE);
+	rv = nng_dialer_setopt_ptr(dialer, NNG_OPT_TLS_CONFIG, cfg);
+
+out:
+	nng_tls_config_free(cfg);
+	return (rv);
+}
+
+static int
+init_listener_tls(nng_listener listener) {
+	nng_tls_config *cfg;
+	int             rv;
+
+	if ((rv = nng_tls_config_alloc(&cfg, NNG_TLS_MODE_SERVER)) != 0) {
+		return (rv);
+	}
+	if ((rv = nng_tls_config_own_cert(cfg, cert, key, NULL)) != 0) {
+		goto out;
+	}
+	if ((rv = nng_tls_config_ca_chain(cfg, ca, NULL)) != 0) {
+		goto out;
+	}
+	if ((rv = nng_listener_setopt_ptr(listener, NNG_OPT_TLS_CONFIG, cfg)) != 0) {
+		goto out;
+	}
+out:
+	nng_tls_config_free(cfg);
+	return (0);
+}
+
+static struct {
+	int posix_err;
+	int nng_err;
+} nni_plat_errnos[] = {
+	// clang-format off
+	{ EINTR,	   NNG_EINTR	    },
+	{ EINVAL,	   NNG_EINVAL	    },
+	{ ENOMEM,	   NNG_ENOMEM	    },
+	{ EACCES,	   NNG_EPERM	    },
+	{ EADDRINUSE,	   NNG_EADDRINUSE   },
+	{ EADDRNOTAVAIL,   NNG_EADDRINVAL   },
+	{ EAFNOSUPPORT,	   NNG_ENOTSUP	    },
+	{ EAGAIN,	   NNG_EAGAIN	    },
+	{ EBADF,	   NNG_ECLOSED	    },
+	{ EBUSY,	   NNG_EBUSY	    },
+	{ ECONNABORTED,	   NNG_ECONNABORTED },
+	{ ECONNREFUSED,	   NNG_ECONNREFUSED },
+	{ ECONNRESET,	   NNG_ECONNRESET   },
+	{ EHOSTUNREACH,	   NNG_EUNREACHABLE },
+	{ ENETUNREACH,	   NNG_EUNREACHABLE },
+	{ ENAMETOOLONG,	   NNG_EINVAL	    },
+	{ ENOENT,	   NNG_ENOENT	    },
+	{ ENOBUFS,	   NNG_ENOMEM	    },
+	{ ENOPROTOOPT,	   NNG_ENOTSUP	    },
+	{ ENOSYS,	   NNG_ENOTSUP	    },
+	{ ENOTSUP,	   NNG_ENOTSUP	    },
+	{ EPERM,	   NNG_EPERM	    },
+	{ EPIPE,	   NNG_ECLOSED	    },
+	{ EPROTO,	   NNG_EPROTO	    },
+	{ EPROTONOSUPPORT, NNG_ENOTSUP	    },
+#ifdef  ETIME   // Found in STREAMs, not present on all systems.
+	{ ETIME,	   NNG_ETIMEDOUT    },
+#endif
+	{ ETIMEDOUT,	   NNG_ETIMEDOUT    },
+	{ EWOULDBLOCK,	   NNG_EAGAIN	    },
+	{ ENOSPC,	   NNG_ENOSPC	    },
+	{ EFBIG,	   NNG_ENOSPC	    },
+	{ EDQUOT,	   NNG_ENOSPC	    },
+	{ ENFILE,	   NNG_ENOFILES	    },
+	{ EMFILE,	   NNG_ENOFILES	    },
+	{ EEXIST,	   NNG_EEXIST	    },
+	// must be last
+	{		0,		  0 },
+	// clang-format on
+};
+
+static void
+custom_free(void *ptr, size_t size)
+{
+	CUSTOM_ARG_UNUSED(size);
+	free(ptr);
+}
+
+static void
+custom_strfree(char *s)
+{
+	if (s != NULL) {
+		custom_free(s, strlen(s) + 1);
+	}
+}
+
+static void *
+custom_alloc(size_t sz)
+{
+	return (sz > 0 ? malloc(sz) : NULL);
+}
+
+static char *
+custom_strdup(const char *src)
+{
+	char * dst;
+	size_t len = strlen(src) + 1;
+
+	if ((dst = custom_alloc(len)) != NULL) {
+		memcpy(dst, src, len);
+	}
+	return (dst);
+}
+
+static int
+custom_plat_errno(int errnum)
+{
+	int i;
+
+	if (errnum == 0) {
+		return (0);
+	}
+	// if (errnum == EFAULT) {
+	// 	custom_panic("System EFAULT encountered!");
+	// }
+	for (i = 0; nni_plat_errnos[i].nng_err != 0; i++) {
+		if (errnum == nni_plat_errnos[i].posix_err) {
+			return (nni_plat_errnos[i].nng_err);
+		}
+	}
+	// Other system errno.
+	return (NNG_ESYSERR + errnum);
+}
+
+static int
+custom_plat_file_delete(const char *name)
+{
+	if (rmdir(name) == 0) {
+		return (0);
+	}
+	if ((errno == ENOTDIR) && (unlink(name) == 0)) {
+		return (0);
+	}
+	if (errno == ENOENT) {
+		return (0);
+	}
+	return (custom_plat_errno(errno));
+}
+
+static int
+custom_file_delete(const char *name)
+{
+	return (custom_plat_file_delete(name));
+}
+
+static int
+custom_plat_make_parent_dirs(const char *path)
+{
+	char *dup;
+	char *p;
+	int   rv;
+
+	// creates everything up until the last component.
+	if ((dup = custom_strdup(path)) == NULL) {
+		return (NNG_ENOMEM);
+	}
+	p = dup;
+	while ((p = strchr(p, '/')) != NULL) {
+		if (p != dup) {
+			*p = '\0';
+			rv = mkdir(dup, S_IRWXU);
+			*p = '/';
+			if ((rv != 0) && (errno != EEXIST)) {
+				rv = custom_plat_errno(errno);
+				custom_strfree(dup);
+				return (rv);
+			}
+		}
+
+		// collapse grouped "/" characters
+		while (*p == '/') {
+			p++;
+		}
+	}
+	custom_strfree(dup);
+	return (0);
+}
+
+static int
+custom_plat_file_put(const char *name, const void *data, size_t len)
+{
+	FILE *f;
+	int   rv = 0;
+
+	// It is possible that the name contains a directory path
+	// that does not exist.  In this case we try to create the
+	// entire tree.
+	if (strchr(name, '/') != NULL) {
+		if ((rv = custom_plat_make_parent_dirs(name)) != 0) {
+			return (rv);
+		}
+	}
+
+	if ((f = fopen(name, "wb")) == NULL) {
+		return (custom_plat_errno(errno));
+	}
+	if (fwrite(data, 1, len, f) != len) {
+		rv = custom_plat_errno(errno);
+		(void) unlink(name);
+	}
+	(void) fclose(f);
+	return (rv);
+}
+
+static int
+custom_file_put(const char *name, const void *data, size_t sz)
+{
+	return (custom_plat_file_put(name, data, sz));
+}
+
+static char *
+custom_plat_join_dir(const char *prefix, const char *suffix)
+{
+	char * newdir;
+	size_t len;
+
+	len    = strlen(prefix) + strlen(suffix) + 2;
+	newdir = custom_alloc(strlen(prefix) + strlen(suffix) + 2);
+	if (newdir != NULL) {
+		(void) snprintf(newdir, len, "%s/%s", prefix, suffix);
+	}
+	return (newdir);
+}
+
+static char *
+custom_file_join(const char *dir, const char *file)
+{
+	return (custom_plat_join_dir(dir, file));
+}
+
+static char *
+custom_plat_temp_dir(void)
+{
+	char *temp;
+
+	// POSIX says $TMPDIR is required.
+	if ((temp = getenv("TMPDIR")) != NULL) {
+		return (custom_strdup(temp));
+	}
+	return (custom_strdup("/tmp"));
+}
+
+static int
+init_dialer_tls_file2(nng_dialer dialer)
+{
+	int   rv;
+	char *tmpdir;
+	char *pth;
+
+	if ((tmpdir = custom_plat_temp_dir()) == NULL) {
+		return (NNG_ENOTSUP);
+	}
+	if ((pth = custom_file_join(tmpdir, "tls_test_cacert.pem")) == NULL) {
+		custom_strfree(tmpdir);
+		return (NNG_ENOMEM);
+	}
+	custom_strfree(tmpdir);
+
+	if ((rv = custom_file_put(pth, cert, strlen(cert))) != 0) {
+		custom_strfree(pth);
+		return (rv);
+	}
+
+	rv = nng_dialer_setopt_string(dialer, NNG_OPT_TLS_CA_FILE, pth);
+	custom_file_delete(pth);
+	custom_strfree(pth);
+
+	return (rv);
+}
+
+static int
+custom_asprintf(char **sp, const char *fmt, ...)
+{
+	va_list ap;
+	size_t  len;
+	char *  s;
+
+	va_start(ap, fmt);
+	len = vsnprintf(NULL, 0, fmt, ap);
+	va_end(ap);
+	len++;
+
+	if ((s = custom_alloc(len)) == NULL) {
+		return (NNG_ENOMEM);
+	}
+	va_start(ap, fmt);
+	(void) vsnprintf(s, len, fmt, ap);
+	va_end(ap);
+	*sp = s;
+	return (0);
+}
+
+static int
+init_listener_tls_file2(nng_listener listener)
+{
+	int   rv;
+	char *tmpdir;
+	char *pth;
+	char *certkey;
+
+	if ((tmpdir = custom_plat_temp_dir()) == NULL) {
+		return (NNG_ENOTSUP);
+	}
+
+	if ((pth = custom_file_join(tmpdir, "tls_test_certkey.pem")) == NULL) {
+		custom_strfree(tmpdir);
+		return (NNG_ENOMEM);
+	}
+	custom_strfree(tmpdir);
+
+	if ((rv = custom_asprintf(&certkey, "%s\r\n%s\r\n", cert, key)) != 0) {
+		custom_strfree(pth);
+		return (rv);
+	}
+
+	rv = custom_file_put(pth, certkey, strlen(certkey));
+	custom_strfree(certkey);
+	if (rv != 0) {
+		custom_strfree(pth);
+		return (rv);
+	}
+
+	rv = nng_listener_setopt_string(listener, NNG_OPT_TLS_CERT_KEY_FILE, pth);
+	if (rv != 0) {
+		// We can wind up with EBUSY from the server already
+		// running.
+		if (rv == NNG_EBUSY) {
+			rv = 0;
+		}
+	}
+
+	custom_file_delete(pth);
+	custom_strfree(pth);
+	return (rv);
 }
 
 
@@ -649,9 +1066,11 @@ static void* init(  char* uproto_port, int max_msg_size, int flags ) {
 	char*	tok2;
 	int		state;
 	int		old_vlevel = 0;
-	// char*	cert_key_file;
-	// char*	ca_cert_file;
-	// nng_tls_config	*tls_cfg;
+	char*	cert_path;
+	char*	cert_key_path;
+	nng_tls_config	*tls_cfg;
+	nng_dialer dialer;
+    nng_listener listener;
 
 	old_vlevel = rmr_vlog_init();		// initialise and get the current level
 	rmr_set_vlevel( RMR_VL_INFO );		// we WILL announce our version etc
@@ -695,10 +1114,23 @@ static void* init(  char* uproto_port, int max_msg_size, int flags ) {
 	// we're using a listener to get rtg updates, so we do NOT need this.
 	//uta_lookup_rtg( ctx );							// attempt to fill in rtg info; rtc will handle missing values/errors
 
-	if( nng_pull0_open( &ctx->nn_sock )  !=  0 ) {		// and assign the mode
-		rmr_vlog( RMR_VL_CRIT, "rmr_init: unable to initialise nng listen (pull) socket: %d\n", errno );
-		free_ctx( ctx );
-		return NULL;
+	if( (cert_path = getenv( "CERT_PATH" )) != NULL && (cert_key_path = getenv( "KEY_PATH" ) != NULL)) {
+		if ((state = nng_tls_register()) != 0) {
+			rmr_vlog( RMR_VL_CRIT, "rmr_init: nng_tls_register: %s\n", nng_strerror(state) );
+			return NULL;
+		}
+
+		if (nng_pair1_open(&ctx->nn_sock) != 0) {
+			rmr_vlog( RMR_VL_CRIT, "rmr_init: unable to initialise nng pair1 socket: %d\n", errno );
+			free_ctx( ctx );
+			return NULL;
+		}
+	} else {
+		if( nng_pull0_open( &ctx->nn_sock )  !=  0 ) {		// and assign the mode
+			rmr_vlog( RMR_VL_CRIT, "rmr_init: unable to initialise nng listen (pull) socket: %d\n", errno );
+			free_ctx( ctx );
+			return NULL;
+		}
 	}
 
 	if( (port = strchr( proto_port, ':' )) != NULL ) {
@@ -711,6 +1143,8 @@ static void* init(  char* uproto_port, int max_msg_size, int flags ) {
 	} else {
 		port = proto_port;			// assume something like "1234" was passed
 	}
+
+	rmr_vlog( RMR_VL_DEBUG, "port: %s\n", port);
 
 	if( (tok = getenv( ENV_SRC_ID )) != NULL ) {							// env var overrides what we dig from system
 		tok = strdup( tok );					// something we can destroy
@@ -771,39 +1205,84 @@ static void* init(  char* uproto_port, int max_msg_size, int flags ) {
 		interface = "0.0.0.0";
 	}
 
-	rmr_vlog( RMR_VL_INFO, "[configure_tls nng_tls_register] \n");
+	if( (cert_path = getenv( "CERT_PATH" )) != NULL && \
+		(cert_key_path = getenv( "KEY_PATH" )) != NULL ) {
+		cert_path = getenv( "CERT_PATH" );
+		cert_key_path = getenv( "KEY_PATH" );
 
-	// if( (ca_cert_file = getenv( "CERT_PATH" )) != NULL && (cert_key_file = getenv( "CA_CERT_PATH" ) != NULL)) {
-	// 	ca_cert_file = getenv( "CA_CERT_PATH" );
-	// 	cert_key_file = getenv( "CERT_PATH" );
+		rmr_vlog( RMR_VL_INFO, "rmr_init: cert_path: %s\n", cert_path );
+		rmr_vlog( RMR_VL_INFO, "rmr_init: cert_key_path: %s\n", cert_key_path );
 
-	// 	if ((state = configure_tls(tls_cfg, cert_key_file, ca_cert_file)) != 0) {
-	// 		rmr_vlog( RMR_VL_CRIT, "rmr_init: configure_tls: %s\n", nng_strerror(state) );
-	// 		return NULL;
-	// 	}
+		if ((getenv( "ROLE" )) != NULL && (strcmp(getenv( "ROLE" ), "receiver") == 0)) {
+			interface = "0.0.0.0";
+			snprintf( bind_info, sizeof( bind_info ), "tls+%s://%s:%s", proto, interface, port );
+			rmr_vlog( RMR_VL_DEBUG, "[receiver] bind_info: %s\n", bind_info );
 
-	// 	if ((state = nng_tls_register()) != 0) {
-	// 		rmr_vlog( RMR_VL_CRIT, "rmr_init: nng_tls_register: %s\n", nng_strerror(state) );
-	// 		return NULL;
-	// 	}
+			if((state = nng_listener_create(&listener, ctx->nn_sock, bind_info)) != 0) {
+				rmr_vlog( RMR_VL_CRIT, "rmr_init: nng_listener_create: %s\n", nng_strerror(state) );
+				return NULL;
+			}
 
-	// 	snprintf( bind_info, sizeof( bind_info ), "tls+%s://%s:%s", proto, interface, port );
-	// } else {
-	// 	snprintf( bind_info, sizeof( bind_info ), "%s://%s:%s", proto, interface, port );
-	// }
+			if((state = init_listener_tls_ex(listener, NNG_TLS_AUTH_MODE_REQUIRED)) != 0) {
+				rmr_vlog( RMR_VL_CRIT, "rmr_init: init_listener_tls: %s\n", nng_strerror(state) );
+				return NULL;
+			}
 
-	// NOTE: if there are options that might need to be configured, the listener must be created, options set, then started
-	//       rather than using this generic listen() call.
-	snprintf( bind_info, sizeof( bind_info ), "%s://%s:%s", proto, interface, port );
-	if( (state = nng_listen( ctx->nn_sock, bind_info, NULL, NO_FLAGS )) != 0 ) {
-		rmr_vlog( RMR_VL_CRIT, "rmr_init: unable to start nng listener for %s: %s\n", bind_info, nng_strerror( state ) );
-		nng_close( ctx->nn_sock );
-		// if (tls_cfg != NULL) {
-		// 	nng_tls_config_free(tls_cfg);
-		// }
-		free( proto_port );
-		free_ctx( ctx );
-		return NULL;
+			if( (state = nng_listener_start( listener, 0 )) != 0 ) {
+				rmr_vlog( RMR_VL_CRIT, "rmr_init: unable to start nng listener for %s: %s\n", bind_info, nng_strerror( state ) );
+				nng_close( ctx->nn_sock );
+				free( proto_port );
+				free_ctx( ctx );
+				return NULL;
+			}
+
+		} else if ((getenv( "ROLE" )) != NULL && (strcmp(getenv( "ROLE" ), "sender") == 0)) {
+			snprintf( bind_info, sizeof( bind_info ), "tls+%s://%s:%s", proto, getenv( "LISTENER_INTERFACE" ), getenv( "LISTENER_PORT" ) );
+			rmr_vlog( RMR_VL_DEBUG, "[sender/dialer] bind_info: %s\n", bind_info );
+
+			if((state = nng_dialer_create(&dialer, ctx->nn_sock, bind_info)) != 0) {
+				rmr_vlog( RMR_VL_CRIT, "rmr_init: nng_dialer_create: %s\n", nng_strerror(state) );
+				return NULL;
+			}
+
+			if((state = init_dialer_tls_ex(dialer, true)) != 0) {
+				rmr_vlog( RMR_VL_CRIT, "rmr_init: init_dialer_tls: %s\n", nng_strerror(state) );
+				return NULL;
+			}
+
+			if((state = nng_dialer_setopt_int(dialer, NNG_OPT_TLS_AUTH_MODE, NNG_TLS_AUTH_MODE_NONE)) != 0) {
+				rmr_vlog( RMR_VL_CRIT, "rmr_init: nng_dialer_setopt_int: %s\n", nng_strerror(state) );
+				return NULL;
+			}
+
+			if((state = nng_setopt_ms(ctx->nn_sock, NNG_OPT_RECVTIMEO, 200)) != 0) {
+				rmr_vlog( RMR_VL_CRIT, "rmr_init: nng_setopt_ms: %s\n", nng_strerror(state) );
+				return NULL;
+			}
+
+			if( (state = nng_dialer_start( dialer, 0 )) != 0 ) {
+				rmr_vlog( RMR_VL_CRIT, "rmr_init: unable to start nng dialer for %s: %s\n", bind_info, nng_strerror( state ) );
+				nng_close( ctx->nn_sock );
+				free( proto_port );
+				free_ctx( ctx );
+				return NULL;
+			}
+
+			nng_msleep(100);
+		}
+		
+
+	} else {
+		// NOTE: if there are options that might need to be configured, the listener must be created, options set, then started
+		//       rather than using this generic listen() call.
+		snprintf( bind_info, sizeof( bind_info ), "%s://%s:%s", proto, interface, port );
+		if( (state = nng_listen( ctx->nn_sock, bind_info, NULL, NO_FLAGS )) != 0 ) {
+			rmr_vlog( RMR_VL_CRIT, "rmr_init: unable to start nng listener for %s: %s\n", bind_info, nng_strerror( state ) );
+			nng_close( ctx->nn_sock );
+			free( proto_port );
+			free_ctx( ctx );
+			return NULL;
+		}
 	}
 
 	if( flags & FL_NOTHREAD ) {								// if no rtc thread, we still need an empty route table for wormholes

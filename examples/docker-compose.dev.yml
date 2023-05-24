@@ -1,0 +1,37 @@
+version: '3'
+
+services:
+  rmr_sender:
+    build:
+      context: .
+      dockerfile: Dockerfile.sender
+    volumes:
+      - ./shared/:/app/shared/
+    environment:
+      RMR_RTG_SVC: -1
+      RMR_SEED_RT: /app/shared/route_table.rt
+      CERT_PATH: /app/cert.pem
+      KEY_PATH: /app/key.pem
+      ROLE: sender
+      LISTENER_PORT: 4560
+    ports:
+      - 43086:43086
+    command: sh -c "sleep 10 && ./sender"
+    depends_on:
+      - rmr_receiver
+
+  rmr_receiver:
+    build:
+      context: .
+      dockerfile: Dockerfile.receiver
+    volumes:
+      - ./shared/:/app/shared/
+    environment:
+      RMR_RTG_SVC: -1
+      RMR_SEED_RT: /app/shared/route_table.rt
+      CERT_PATH: /app/cert.pem
+      KEY_PATH: /app/key.pem
+      ROLE: receiver
+    ports:
+      - 4560:4560
+    command: sh -c "./receiver"

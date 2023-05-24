@@ -27,10 +27,10 @@ all: sender receiver sender_si receiver_si
 
 # ---- binaries on top of NNG -------------------------
 receiver: receiver.c
-	gcc $< -g -o $@ -lrmr_nng -lnng -lpthread -lm
+	gcc -I/usr/local/include/nng/transport/tls $< -g -o $@ -lrmr_nng -lnng -lpthread -lm
 
 sender: sender.c
-	gcc $< -g -o $@ -lrmr_nng -lnng -lpthread -lm
+	gcc -I/usr/local/include/nng/transport/tls $< -g -o $@ -lrmr_nng -lnng -lpthread -lm
 
 health_check: health_check.c
 	gcc $< -g -o $@ -lrmr_nng -lnng -lpthread -lm

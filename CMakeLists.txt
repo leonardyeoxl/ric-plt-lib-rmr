@@ -167,9 +167,9 @@ endif()
 # ---------------- setup nano/nng things ---------------------------------------
 if( NOT SKIP_EXTERNALS )
 	set( need_ext 1 )				# we force dependences on these for right build order
-    execute_process( COMMAND  git submodule update --init -- ext/nng
-            WORKING_DIRECTORY  ${CMAKE_CURRENT_SOURCE_DIR}
-    )
+    #execute_process( COMMAND  git submodule update --init -- ext/nng
+    #        WORKING_DIRECTORY  ${CMAKE_CURRENT_SOURCE_DIR}
+    #)
 
     if( NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/ext/nng/CMakeLists.txt )
         message( FATAL_ERROR "cannot find nng in our git source as a submodule: Giving up" )	# this will abort which seems wrong, but tdam.
@@ -181,6 +181,7 @@ if( NOT SKIP_EXTERNALS )
 		SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ext/nng"
 		CMAKE_ARGS "-DBUILD_SHARED_LIBS=1"
 		CMAKE_ARGS "-DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}"
+		CMAKE_ARGS "-DNNG_ENABLE_TLS=ON"
 		BUILD_COMMAND "make"
 		UPDATE_COMMAND ""
 		TEST_COMMAND ""
@@ -191,7 +192,7 @@ if( NOT SKIP_EXTERNALS )
 	# hard code (shudder) some things. Even worse, we have to make exceptions for
 	# builds on apple (osx) since their naming convention wandered off the path.
 	set( nng_major 1 )
-	set( nng_minor 1.0 )
+	set( nng_minor 3.0-dev )
 	set( so ${CMAKE_SHARED_LIBRARY_SUFFIX} )	# cmake variables are impossibly long :(
 	if( NOT APPLE ) 				# probably breaks in windows, but idc
 		set( nng_so_suffix ${so} )
