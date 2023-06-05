@@ -14,6 +14,8 @@ services:
       KEY_PATH: /app/key.pem
       ROLE: sender
       LISTENER_PORT: 4560
+      TLS: enable
+      LISTENER_INTERFACE: rmr_receiver
     ports:
       - 43086:43086
     command: sh -c "sleep 10 && ./sender"
@@ -32,6 +34,7 @@ services:
       CERT_PATH: /app/cert.pem
       KEY_PATH: /app/key.pem
       ROLE: receiver
+      TLS: enable
     ports:
       - 4560:4560
     command: sh -c "./receiver"

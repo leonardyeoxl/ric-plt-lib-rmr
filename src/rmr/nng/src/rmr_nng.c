@@ -619,7 +619,7 @@ extern int rmr_set_rtimeout( void* vctx, int time ) {
 }
 
 static int
-init_listener_tls_ex(nng_listener l, int auth_mode)
+init_listener_tls(nng_listener l, int auth_mode)
 {
 	nng_tls_config *cfg;
 	int             rv;
@@ -652,7 +652,7 @@ out:
 }
 
 static int
-init_dialer_tls_ex(nng_dialer d, bool own_cert)
+init_dialer_tls(nng_dialer d, bool own_cert)
 {
 	nng_tls_config *cfg;
 	int             rv;
@@ -681,367 +681,6 @@ init_dialer_tls_ex(nng_dialer d, bool own_cert)
 
 out:
 	nng_tls_config_free(cfg);
-	return (rv);
-}
-
-static int
-init_dialer_tls(nng_dialer dialer) {
-	nng_tls_config *cfg;
-	int             rv;
-
-	if ((rv = nng_tls_config_alloc(&cfg, NNG_TLS_MODE_CLIENT)) != 0) {
-		return (rv);
-	}
-
-	if ((rv = nng_tls_config_own_cert(cfg, cert, key, NULL)) != 0) {
-		goto out;
-	}
-
-	if ((rv = nng_tls_config_ca_chain(cfg, ca, NULL)) != 0) {
-		goto out;
-	}
-
-	if ((rv = nng_tls_config_server_name(cfg, "rmr_receiver")) != 0) {
-		goto out;
-	}
-	nng_tls_config_auth_mode(cfg, NNG_TLS_AUTH_MODE_NONE);
-	rv = nng_dialer_setopt_ptr(dialer, NNG_OPT_TLS_CONFIG, cfg);
-
-out:
-	nng_tls_config_free(cfg);
-	return (rv);
-}
-
-static int
-init_listener_tls(nng_listener listener) {
-	nng_tls_config *cfg;
-	int             rv;
-
-	if ((rv = nng_tls_config_alloc(&cfg, NNG_TLS_MODE_SERVER)) != 0) {
-		return (rv);
-	}
-	if ((rv = nng_tls_config_own_cert(cfg, cert, key, NULL)) != 0) {
-		goto out;
-	}
-	if ((rv = nng_tls_config_ca_chain(cfg, ca, NULL)) != 0) {
-		goto out;
-	}
-	if ((rv = nng_listener_setopt_ptr(listener, NNG_OPT_TLS_CONFIG, cfg)) != 0) {
-		goto out;
-	}
-out:
-	nng_tls_config_free(cfg);
-	return (0);
-}
-
-static struct {
-	int posix_err;
-	int nng_err;
-} nni_plat_errnos[] = {
-	// clang-format off
-	{ EINTR,	   NNG_EINTR	    },
-	{ EINVAL,	   NNG_EINVAL	    },
-	{ ENOMEM,	   NNG_ENOMEM	    },
-	{ EACCES,	   NNG_EPERM	    },
-	{ EADDRINUSE,	   NNG_EADDRINUSE   },
-	{ EADDRNOTAVAIL,   NNG_EADDRINVAL   },
-	{ EAFNOSUPPORT,	   NNG_ENOTSUP	    },
-	{ EAGAIN,	   NNG_EAGAIN	    },
-	{ EBADF,	   NNG_ECLOSED	    },
-	{ EBUSY,	   NNG_EBUSY	    },
-	{ ECONNABORTED,	   NNG_ECONNABORTED },
-	{ ECONNREFUSED,	   NNG_ECONNREFUSED },
-	{ ECONNRESET,	   NNG_ECONNRESET   },
-	{ EHOSTUNREACH,	   NNG_EUNREACHABLE },
-	{ ENETUNREACH,	   NNG_EUNREACHABLE },
-	{ ENAMETOOLONG,	   NNG_EINVAL	    },
-	{ ENOENT,	   NNG_ENOENT	    },
-	{ ENOBUFS,	   NNG_ENOMEM	    },
-	{ ENOPROTOOPT,	   NNG_ENOTSUP	    },
-	{ ENOSYS,	   NNG_ENOTSUP	    },
-	{ ENOTSUP,	   NNG_ENOTSUP	    },
-	{ EPERM,	   NNG_EPERM	    },
-	{ EPIPE,	   NNG_ECLOSED	    },
-	{ EPROTO,	   NNG_EPROTO	    },
-	{ EPROTONOSUPPORT, NNG_ENOTSUP	    },
-#ifdef  ETIME   // Found in STREAMs, not present on all systems.
-	{ ETIME,	   NNG_ETIMEDOUT    },
-#endif
-	{ ETIMEDOUT,	   NNG_ETIMEDOUT    },
-	{ EWOULDBLOCK,	   NNG_EAGAIN	    },
-	{ ENOSPC,	   NNG_ENOSPC	    },
-	{ EFBIG,	   NNG_ENOSPC	    },
-	{ EDQUOT,	   NNG_ENOSPC	    },
-	{ ENFILE,	   NNG_ENOFILES	    },
-	{ EMFILE,	   NNG_ENOFILES	    },
-	{ EEXIST,	   NNG_EEXIST	    },
-	// must be last
-	{		0,		  0 },
-	// clang-format on
-};
-
-static void
-custom_free(void *ptr, size_t size)
-{
-	CUSTOM_ARG_UNUSED(size);
-	free(ptr);
-}
-
-static void
-custom_strfree(char *s)
-{
-	if (s != NULL) {
-		custom_free(s, strlen(s) + 1);
-	}
-}
-
-static void *
-custom_alloc(size_t sz)
-{
-	return (sz > 0 ? malloc(sz) : NULL);
-}
-
-static char *
-custom_strdup(const char *src)
-{
-	char * dst;
-	size_t len = strlen(src) + 1;
-
-	if ((dst = custom_alloc(len)) != NULL) {
-		memcpy(dst, src, len);
-	}
-	return (dst);
-}
-
-static int
-custom_plat_errno(int errnum)
-{
-	int i;
-
-	if (errnum == 0) {
-		return (0);
-	}
-	// if (errnum == EFAULT) {
-	// 	custom_panic("System EFAULT encountered!");
-	// }
-	for (i = 0; nni_plat_errnos[i].nng_err != 0; i++) {
-		if (errnum == nni_plat_errnos[i].posix_err) {
-			return (nni_plat_errnos[i].nng_err);
-		}
-	}
-	// Other system errno.
-	return (NNG_ESYSERR + errnum);
-}
-
-static int
-custom_plat_file_delete(const char *name)
-{
-	if (rmdir(name) == 0) {
-		return (0);
-	}
-	if ((errno == ENOTDIR) && (unlink(name) == 0)) {
-		return (0);
-	}
-	if (errno == ENOENT) {
-		return (0);
-	}
-	return (custom_plat_errno(errno));
-}
-
-static int
-custom_file_delete(const char *name)
-{
-	return (custom_plat_file_delete(name));
-}
-
-static int
-custom_plat_make_parent_dirs(const char *path)
-{
-	char *dup;
-	char *p;
-	int   rv;
-
-	// creates everything up until the last component.
-	if ((dup = custom_strdup(path)) == NULL) {
-		return (NNG_ENOMEM);
-	}
-	p = dup;
-	while ((p = strchr(p, '/')) != NULL) {
-		if (p != dup) {
-			*p = '\0';
-			rv = mkdir(dup, S_IRWXU);
-			*p = '/';
-			if ((rv != 0) && (errno != EEXIST)) {
-				rv = custom_plat_errno(errno);
-				custom_strfree(dup);
-				return (rv);
-			}
-		}
-
-		// collapse grouped "/" characters
-		while (*p == '/') {
-			p++;
-		}
-	}
-	custom_strfree(dup);
-	return (0);
-}
-
-static int
-custom_plat_file_put(const char *name, const void *data, size_t len)
-{
-	FILE *f;
-	int   rv = 0;
-
-	// It is possible that the name contains a directory path
-	// that does not exist.  In this case we try to create the
-	// entire tree.
-	if (strchr(name, '/') != NULL) {
-		if ((rv = custom_plat_make_parent_dirs(name)) != 0) {
-			return (rv);
-		}
-	}
-
-	if ((f = fopen(name, "wb")) == NULL) {
-		return (custom_plat_errno(errno));
-	}
-	if (fwrite(data, 1, len, f) != len) {
-		rv = custom_plat_errno(errno);
-		(void) unlink(name);
-	}
-	(void) fclose(f);
-	return (rv);
-}
-
-static int
-custom_file_put(const char *name, const void *data, size_t sz)
-{
-	return (custom_plat_file_put(name, data, sz));
-}
-
-static char *
-custom_plat_join_dir(const char *prefix, const char *suffix)
-{
-	char * newdir;
-	size_t len;
-
-	len    = strlen(prefix) + strlen(suffix) + 2;
-	newdir = custom_alloc(strlen(prefix) + strlen(suffix) + 2);
-	if (newdir != NULL) {
-		(void) snprintf(newdir, len, "%s/%s", prefix, suffix);
-	}
-	return (newdir);
-}
-
-static char *
-custom_file_join(const char *dir, const char *file)
-{
-	return (custom_plat_join_dir(dir, file));
-}
-
-static char *
-custom_plat_temp_dir(void)
-{
-	char *temp;
-
-	// POSIX says $TMPDIR is required.
-	if ((temp = getenv("TMPDIR")) != NULL) {
-		return (custom_strdup(temp));
-	}
-	return (custom_strdup("/tmp"));
-}
-
-static int
-init_dialer_tls_file2(nng_dialer dialer)
-{
-	int   rv;
-	char *tmpdir;
-	char *pth;
-
-	if ((tmpdir = custom_plat_temp_dir()) == NULL) {
-		return (NNG_ENOTSUP);
-	}
-	if ((pth = custom_file_join(tmpdir, "tls_test_cacert.pem")) == NULL) {
-		custom_strfree(tmpdir);
-		return (NNG_ENOMEM);
-	}
-	custom_strfree(tmpdir);
-
-	if ((rv = custom_file_put(pth, cert, strlen(cert))) != 0) {
-		custom_strfree(pth);
-		return (rv);
-	}
-
-	rv = nng_dialer_setopt_string(dialer, NNG_OPT_TLS_CA_FILE, pth);
-	custom_file_delete(pth);
-	custom_strfree(pth);
-
-	return (rv);
-}
-
-static int
-custom_asprintf(char **sp, const char *fmt, ...)
-{
-	va_list ap;
-	size_t  len;
-	char *  s;
-
-	va_start(ap, fmt);
-	len = vsnprintf(NULL, 0, fmt, ap);
-	va_end(ap);
-	len++;
-
-	if ((s = custom_alloc(len)) == NULL) {
-		return (NNG_ENOMEM);
-	}
-	va_start(ap, fmt);
-	(void) vsnprintf(s, len, fmt, ap);
-	va_end(ap);
-	*sp = s;
-	return (0);
-}
-
-static int
-init_listener_tls_file2(nng_listener listener)
-{
-	int   rv;
-	char *tmpdir;
-	char *pth;
-	char *certkey;
-
-	if ((tmpdir = custom_plat_temp_dir()) == NULL) {
-		return (NNG_ENOTSUP);
-	}
-
-	if ((pth = custom_file_join(tmpdir, "tls_test_certkey.pem")) == NULL) {
-		custom_strfree(tmpdir);
-		return (NNG_ENOMEM);
-	}
-	custom_strfree(tmpdir);
-
-	if ((rv = custom_asprintf(&certkey, "%s\r\n%s\r\n", cert, key)) != 0) {
-		custom_strfree(pth);
-		return (rv);
-	}
-
-	rv = custom_file_put(pth, certkey, strlen(certkey));
-	custom_strfree(certkey);
-	if (rv != 0) {
-		custom_strfree(pth);
-		return (rv);
-	}
-
-	rv = nng_listener_setopt_string(listener, NNG_OPT_TLS_CERT_KEY_FILE, pth);
-	if (rv != 0) {
-		// We can wind up with EBUSY from the server already
-		// running.
-		if (rv == NNG_EBUSY) {
-			rv = 0;
-		}
-	}
-
-	custom_file_delete(pth);
-	custom_strfree(pth);
 	return (rv);
 }
 
@@ -1223,7 +862,7 @@ static void* init(  char* uproto_port, int max_msg_size, int flags ) {
 				return NULL;
 			}
 
-			if((state = init_listener_tls_ex(listener, NNG_TLS_AUTH_MODE_REQUIRED)) != 0) {
+			if((state = init_listener_tls(listener, NNG_TLS_AUTH_MODE_REQUIRED)) != 0) {
 				rmr_vlog( RMR_VL_CRIT, "rmr_init: init_listener_tls: %s\n", nng_strerror(state) );
 				return NULL;
 			}
@@ -1245,7 +884,7 @@ static void* init(  char* uproto_port, int max_msg_size, int flags ) {
 				return NULL;
 			}
 
-			if((state = init_dialer_tls_ex(dialer, true)) != 0) {
+			if((state = init_dialer_tls(dialer, true)) != 0) {
 				rmr_vlog( RMR_VL_CRIT, "rmr_init: init_dialer_tls: %s\n", nng_strerror(state) );
 				return NULL;
 			}
@@ -1267,8 +906,6 @@ static void* init(  char* uproto_port, int max_msg_size, int flags ) {
 				free_ctx( ctx );
 				return NULL;
 			}
-
-			nng_msleep(100);
 		}
 		
 

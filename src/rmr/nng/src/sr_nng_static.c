@@ -639,6 +639,7 @@ static rmr_mbuf_t* send_msg( uta_ctx_t* ctx, rmr_mbuf_t* msg, nng_socket nn_sock
 	int nng_flags = NNG_FLAG_NONBLOCK;		// if we need to set any nng flags (zc buffer) add it to this
 	int spin_retries = 1000;				// if eagain/timeout we'll spin, at max, this many times before giving up the CPU
 	int	tr_len;								// trace len in sending message so we alloc new message with same trace sizes
+	nng_socket nng_sock = nn_sock;
 
 	// future: ensure that application did not overrun the XID buffer; last byte must be 0
 
@@ -661,9 +662,18 @@ static rmr_mbuf_t* send_msg( uta_ctx_t* ctx, rmr_mbuf_t* msg, nng_socket nn_sock
 	errno = 0;
 	msg->state = RMR_OK;
 	if( msg->flags & MFL_ZEROCOPY ) {									// faster sending with zcopy buffer
+		rmr_vlog( RMR_VL_DEBUG, "send_msg msg->flags: %d MFL_ZEROCOPY: %d\n", msg->flags, MFL_ZEROCOPY );
+		if( getenv( "TLS" ) != NULL ) {
+			if (strcmp(getenv( "TLS" ), "enable") == 0) {
+				rmr_vlog( RMR_VL_DEBUG, "TLS: %s", getenv( "TLS" ));
+				nng_sock = ctx->nn_sock; // needed to enable NNG TLS
+			}
+		}
+		
 		do {
-			if( (state = nng_sendmsg( nn_sock, (nng_msg *) msg->tp_buf, nng_flags )) != 0 ) {		// must check and retry some if transient failure
+			if( (state = nng_sendmsg( nng_sock, (nng_msg *) msg->tp_buf, nng_flags )) != 0 ) {		// must check and retry some if transient failure
 				msg->state = state;
+				rmr_vlog( RMR_VL_DEBUG, "send_msg msg->state: %s\n", nng_strerror( state ) );
 				if( retries > 0 && (state == NNG_EAGAIN || state == NNG_ETIMEDOUT) ) {
 					if( --spin_retries <= 0 ) {			// don't give up the processor if we don't have to
 						retries--;
@@ -674,7 +684,7 @@ static rmr_mbuf_t* send_msg( uta_ctx_t* ctx, rmr_mbuf_t* msg, nng_socket nn_sock
 					}
 				} else {
 					state = 0;			// don't loop
-					//if( DEBUG ) fprintf( stderr, ">>>>> send failed: %s\n", nng_strerror( state ) );
+					if( DEBUG ) fprintf( stderr, ">>>>> send failed: %s\n", nng_strerror( state ) );
 				}
 			} else {
 				state = 0;
@@ -714,7 +724,6 @@ static rmr_mbuf_t* send_msg( uta_ctx_t* ctx, rmr_mbuf_t* msg, nng_socket nn_sock
 			msg->state = xlate_nng_state( msg->state, RMR_ERR_SENDFAILED );		// xlate to our state and set errno
 		}
 
-		if( DEBUG ) rmr_vlog( RMR_VL_DEBUG, "send failed: %d %s\n", (int) msg->state, strerror( msg->state ) );
 	}
 
 	return msg;
